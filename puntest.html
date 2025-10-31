@@ -1,0 +1,1198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spirit Box (Ghost App)</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 
+        NOTE: This file is fully self-contained. The only change needed for local execution or
+        GitHub deployment is inserting your personal Gemini API Key below.
+    -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Creepster&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #1a1a2e; /* Deep purple/blue background */
+            color: #e5e5e5;
+        }
+        .creepster-font {
+            font-family: 'Creepster', cursive;
+        }
+        .device-frame {
+            background: #111;
+            border: 4px solid #3f3f46;
+            box-shadow: 0 0 40px rgba(181, 15, 15, 0.5), inset 0 0 15px #000;
+        }
+        .mic-button {
+            transition: all 0.2s;
+        }
+        .mic-button:hover:not(.listening) {
+            transform: scale(1.05);
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.4);
+        }
+        .listening {
+            animation: pulse-red 1.5s infinite;
+        }
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 25px rgba(239, 68, 68, 0); }
+        }
+        .response-text {
+            color: #999;
+            white-space: pre-wrap;
+            min-height: 5rem;
+            text-align: center; 
+            text-shadow: 0 0 5px rgba(239, 68, 68, 0.2); 
+        }
+        
+        /* Waveform Styling */
+        #waveformCanvas {
+            display: block;
+            width: 100%; /* Ensure it's responsive */
+            height: 80px;
+            margin: 0 auto;
+            opacity: 0.8;
+            border-bottom: 1px solid rgba(255, 0, 0, 0.2);
+            border-top: 1px solid rgba(255, 0, 0, 0.2);
+        }
+        
+        /* CSS for sentence animation */
+        .animated-sentence {
+            opacity: 0;
+            transform: scale(0.95);
+            transition: opacity 0.2s ease-out, transform 0.2s ease-out, color 0.1s; 
+            display: inline-block;
+            font-size: 1.1rem; 
+            color: #d1d1d1; 
+        }
+        .animated-sentence.active {
+            opacity: 1;
+            transform: scale(1.0);
+            color: #fff; 
+        }
+        .animated-sentence.fading-out {
+            opacity: 0;
+            transform: scale(0.85); 
+            transition: opacity 0.1s ease-out, transform 0.1s ease-out;
+        }
+        
+        /* Tuning Dial Styling */
+        .tuning-dial {
+            transition: all 0.2s ease-in-out;
+            cursor: pointer;
+            position: relative;
+        }
+        .tuning-dial:hover:not(.dial-disabled) {
+            transform: rotate(10deg);
+            box-shadow: 0 0 10px rgba(251, 191, 36, 0.6), inset 0 0 5px rgba(0, 0, 0, 0.5);
+        }
+        .tuning-dial-disabled {
+            opacity: 0.5;
+            pointer-events: none;
+            cursor: default;
+        }
+        .tuning-dial-marker {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform-origin: 0 0; 
+            width: 2px;
+            height: 12px;
+            background-color: #FBBF24; 
+            transition: transform 0.2s;
+            border-radius: 9999px;
+            margin-top: -12px;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div id="app" class="device-frame max-w-lg w-full p-6 rounded-3xl space-y-6">
+
+        
+        <div class="text-center">
+            <h1 class="text-3xl text-red-500 creepster-font tracking-wider">
+                SPIRIT BOX
+            </h1>
+            
+            <h2 class="text-xl text-green-400 creepster-font tracking-wider mt-1">
+                PairUnNormal Degens
+            </h2>
+        </div>
+        
+        <div id="locationWrapper" class="space-y-2">
+            <label for="location" class="block text-sm font-medium text-gray-400">Investigating Location:</label>
+            <input type="text" id="location" placeholder="e.g., Abandoned Asylum, Old Mill, My House"
+                   value="Salem, Massachusetts"
+                   class="w-full p-3 rounded-xl bg-gray-800 text-white border border-gray-700 focus:ring-red-500 focus:border-red-500 transition duration-150">
+            <button onclick="lockLocation()" id="lockButton"
+                    class="w-full py-2 bg-red-800 text-white rounded-xl hover:bg-red-700 transition duration-150 font-semibold shadow-md shadow-red-900">
+                Lock Location
+            </button>
+        </div>
+
+        
+        <div id="lockedLocationDisplay" class="hidden"></div>
+
+        
+        <div class="bg-gray-900 p-4 rounded-xl border border-gray-700 space-y-3 min-h-32">
+            <div id="status" class="text-center text-lg font-semibold text-green-500">
+                Ready to Investigate
+            </div>
+
+            
+            <canvas id="waveformCanvas"></canvas>
+
+            <p id="responseText" class="response-text text-sm italic">
+                <span class="text-sm italic text-gray-400">Please lock the investigation location.</span>
+            </p>
+            <div id="citationArea" class="text-xs text-gray-500 mt-2 hidden">
+                <span class="font-bold">Sources:</span> <span id="citationList"></span>
+            </div>
+        </div>
+
+        
+        <div class="flex justify-center items-center space-x-6">
+            <button id="stopButton" onclick="stopCommunication()" disabled
+                    class="py-3 px-6 bg-gray-600 text-white rounded-xl hover:bg-red-700 transition duration-200 focus:outline-none font-semibold text-sm shadow-md shadow-gray-900">
+                STOP
+            </button>
+
+            
+            <div id="tuningDialWrapper" class="flex flex-col items-center space-y-1">
+                <div id="tuningDial" onclick="resetLocation()"
+                     class="w-16 h-16 bg-gray-800 rounded-full border-4 border-yellow-500 shadow-md shadow-yellow-900 tuning-dial flex items-center justify-center dial-disabled">
+                    <div id="tuningDialMarker" class="tuning-dial-marker" style="transform: rotate(45deg);"></div>
+                </div>
+                <span class="text-xs text-yellow-500 font-bold tracking-wider">TUNE</span>
+            </div>
+
+            <button id="micButton" onclick="startListening()"
+                    class="mic-button w-24 h-24 rounded-full flex items-center justify-center bg-gray-600 text-white hover:bg-red-600 transition duration-200 focus:outline-none" disabled>
+                
+                <svg id="micIcon" xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>
+                </svg>
+            </button>
+        </div>
+        
+        <!-- NEW TEXT INPUT FALLBACK AREA -->
+        <div id="textInputFallback" class="hidden space-y-2 mt-4">
+            <label for="textQuestion" class="block text-sm font-medium text-gray-400 text-center">
+                Manual Text Input (Speech Failed)
+            </label>
+            <div class="flex space-x-2">
+                <input type="text" id="textQuestion" placeholder="Ask a question..."
+                       class="flex-grow p-3 rounded-xl bg-gray-800 text-white border border-gray-700 focus:ring-red-500 focus:border-red-500 transition duration-150">
+                <button onclick="askTextQuestion()" id="askButton" disabled
+                        class="py-3 px-4 bg-red-800 text-white rounded-xl hover:bg-red-700 transition duration-150 font-semibold shadow-md shadow-red-900 text-sm">
+                    Ask
+                </button>
+            </div>
+        </div>
+        <!-- END NEW TEXT INPUT AREA -->
+
+    </div>
+
+    <script>
+        // --- Globals ---
+        const TEXT_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
+        const TTS_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent";
+        
+        // *******************************************************************
+        // ******* ACTION REQUIRED: PASTE YOUR GEMINI API KEY HERE *******
+        // *******************************************************************
+        // IMPORTANT: Paste your key here. It may be an AIzaSy... or an sk-proj-... key.
+        const API_KEY = "AIzaSyDz-JjHEemD4FHuPgFihl7sRX4qGHjZ8EY"; // <--- Insert your key here!
+        // *******************************************************************
+
+        // --- DOM Elements ---
+        const statusEl = document.getElementById('status');
+        const responseTextEl = document.getElementById('responseText');
+        const micButton = document.getElementById('micButton');
+        const stopButton = document.getElementById('stopButton');
+        const tuningDial = document.getElementById('tuningDial');
+        const tuningDialMarker = document.getElementById('tuningDialMarker');
+        const locationInput = document.getElementById('location');
+        const locationWrapper = document.getElementById('locationWrapper');
+        const citationArea = document.getElementById('citationArea');
+        const citationList = document.getElementById('citationList');
+        const canvas = document.getElementById('waveformCanvas');
+        const ctx = canvas.getContext('2d');
+        const textInputFallback = document.getElementById('textInputFallback');
+        const textQuestionInput = document.getElementById('textQuestion');
+        const askButton = document.getElementById('askButton');
+
+
+        // --- Audio Context & Nodes ---
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        let staticSource = null;
+        let mainGain = null; // Controls all sound output (static + voice)
+        let reverbNode = null; // The ConvolverNode for the reverb effect
+        
+        let analyser = null; // Analyser for real-time visualization
+        let streamSource = null; // Source for microphone stream
+        let stream = null; // Holds the microphone stream object
+        let timeDataArray = null; // Array to hold time-domain data
+
+        // --- State Variables ---
+        let isListening = false;
+        let isLocationLocked = false;
+        let isCommunicating = false;
+        let recognition = null;
+        let waveAnimationId = null;
+        const maxRetries = 3;
+        let speechResultFound = false; // Tracks if a question was successfully transcribed
+
+        // --- Audio Setup ---
+
+        function createReverbImpulse(context) {
+            const duration = 2.0; 
+            const sampleRate = context.sampleRate;
+            const length = sampleRate * duration;
+            const impulse = context.createBuffer(2, length, sampleRate);
+            const impulseL = impulse.getChannelData(0);
+            const impulseR = impulse.getChannelData(1);
+            
+            for (let i = 0; i < length; i++) {
+                let n = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2); 
+                impulseL[i] = n * 0.4;
+                impulseR[i] = n * 0.4;
+            }
+            return impulse;
+        }
+        
+        function setupAudioNodes() {
+            if (!mainGain) {
+                mainGain = audioContext.createGain();
+                mainGain.gain.setValueAtTime(1, audioContext.currentTime);
+                mainGain.connect(audioContext.destination);
+            }
+            
+            if (!reverbNode) {
+                reverbNode = audioContext.createConvolver();
+                reverbNode.buffer = createReverbImpulse(audioContext); 
+                reverbNode.connect(mainGain);
+            }
+
+            if (!analyser) {
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048;
+                const bufferLength = analyser.frequencyBinCount;
+                timeDataArray = new Uint8Array(bufferLength);
+            }
+        }
+
+
+        /**
+         * Utility function to fetch with a timeout. This is CRITICAL for mobile
+         * where network requests can be silently suspended by the OS/browser.
+         */
+        async function fetchWithTimeout(resource, options, timeout = 15000) {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeout);
+
+            try {
+                const response = await fetch(resource, {
+                    ...options,
+                    signal: controller.signal  
+                });
+                clearTimeout(id);
+                return response;
+            } catch (error) {
+                clearTimeout(id);
+                if (error.name === 'AbortError') {
+                    throw new Error("ConnectionTimeout");
+                }
+                throw error;
+            }
+        }
+
+        /**
+         * Exponential backoff for API calls.
+         */
+        function getBackoffDelay(attempt) {
+            return Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+        }
+
+        /**
+         * Creates a custom message box instead of using alert().
+         */
+        function showModal(message) {
+            responseTextEl.innerHTML = `<span class="text-red-500">SYSTEM ERROR: ${message}</span>`;
+        }
+        
+        // --- Base64/PCM/WAV utility functions (necessary for TTS playback) ---
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        function pcmToWav(pcm16, sampleRate) {
+            const numChannels = 1;
+            const bytesPerSample = 2;
+            const buffer = new ArrayBuffer(44 + pcm16.byteLength);
+            const view = new DataView(buffer);
+            let offset = 0;
+            function writeString(str) {
+                for (let i = 0; i < str.length; i++) {
+                    view.setUint8(offset + i, str.charCodeAt(i));
+                }
+                offset += str.length;
+            }
+
+            writeString('RIFF'); view.setUint32(offset, 36 + pcm16.byteLength, true); offset += 4;
+            writeString('WAVE');
+            writeString('fmt '); view.setUint32(offset, 16, true); offset += 4;
+            view.setUint16(offset, 1, true); offset += 2;        
+            view.setUint16(offset, numChannels, true); offset += 2; 
+            view.setUint32(offset, sampleRate, true); offset += 4;  
+            view.setUint32(offset, sampleRate * numChannels * bytesPerSample, true); offset += 4; 
+            view.setUint16(offset, numChannels * bytesPerSample, true); offset += 2; 
+            view.setUint16(offset, 16, true); offset += 2;       
+            writeString('data'); view.setUint32(offset, pcm16.byteLength, true); offset += 4;
+
+            for (let i = 0; i < pcm16.length; i++) {
+                view.setInt16(offset, pcm16[i], true);
+                offset += 2;
+            }
+            return new Blob([view], { type: 'audio/wav' });
+        }
+        // --- End of Utility functions ---
+
+
+        // --- Audio Control (Static and Fragmentation) ---
+
+        function startStaticNoise() {
+            if (staticSource) return;
+
+            const bufferSize = 2 * audioContext.sampleRate; 
+            const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+
+            for (let i = 0; i < bufferSize; i++) {
+                output[i] = Math.random() * 2 - 1; 
+            }
+
+            staticSource = audioContext.createBufferSource();
+            staticSource.buffer = noiseBuffer;
+            staticSource.loop = true; 
+            
+            const staticGain = audioContext.createGain();
+            staticGain.gain.setValueAtTime(0.08, audioContext.currentTime);
+            
+            staticSource.connect(staticGain).connect(mainGain);
+            staticSource.start();
+        }
+
+        function stopStaticNoise() {
+            if (staticSource) {
+                try {
+                    staticSource.stop(audioContext.currentTime);
+                } catch (e) {
+                    console.warn("Static source already stopped:", e);
+                }
+                staticSource = null;
+            }
+        }
+        
+        function playFragmentedAudio(audioBuffer) {
+            const bufferDuration = audioBuffer.duration;
+            
+            // --- UPDATED FRAGMENTATION SETTINGS ---
+            const playChunk = 0.12; // Shorter play time
+            const pauseChunk = 0.30; // Longer pause time (more choppy)
+            const totalChunk = playChunk + pauseChunk;
+
+            let offset = 0; 
+            let currentTime = audioContext.currentTime;
+            
+            let totalPlaybackDuration = 0;
+
+            const voiceGain = audioContext.createGain();
+            // --- UPDATED VOLUME BOOST (Set to 3.0) ---
+            voiceGain.gain.setValueAtTime(3.0, audioContext.currentTime); // Significantly louder
+            voiceGain.connect(reverbNode);
+
+            while (offset < bufferDuration) {
+                const duration = Math.min(playChunk, bufferDuration - offset);
+                
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(voiceGain); 
+                
+                source.start(currentTime, offset, duration);
+                source.stop(currentTime + duration); 
+
+                currentTime += totalChunk; 
+                offset += playChunk;
+                totalPlaybackDuration += totalChunk;
+                
+                if (offset >= bufferDuration) {
+                    totalPlaybackDuration -= (offset - bufferDuration);
+                }
+            }
+            
+            // Note: This cleanup timeout is based on the *estimated* time.
+            setTimeout(() => {
+                voiceGain.disconnect();
+            }, totalPlaybackDuration * 1000);
+
+            return totalPlaybackDuration;
+        }
+
+        /**
+         * Stops the microphone stream and disconnects the analyser nodes.
+         */
+        function stopMicrophoneStream() {
+            if (streamSource) {
+                streamSource.disconnect();
+                streamSource = null;
+            }
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+        }
+
+
+        // --- Waveform Logic ---
+
+        function resizeCanvas() {
+            // Set canvas size dynamically based on its parent container
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = 80;
+        }
+
+        /**
+         * Draws either the real-time audio waveform or a simulated wave.
+         */
+        function drawWave(time, useAnalyser = false, ghostScale = 1) {
+            const width = canvas.width;
+            const height = canvas.height;
+            const centerY = height / 2;
+
+            ctx.clearRect(0, 0, width, height);
+            ctx.beginPath();
+            
+            ctx.strokeStyle = '#EF4444'; 
+            ctx.lineWidth = 2;
+
+            if (useAnalyser && analyser && timeDataArray) {
+                // --- Real-time Waveform from Mic ---
+                analyser.getByteTimeDomainData(timeDataArray);
+                
+                const sliceWidth = width * 1.0 / timeDataArray.length;
+                let x = 0;
+                
+                for(let i = 0; i < timeDataArray.length; i++) {
+                    // Data is 0-255, scale it to canvas height
+                    const v = timeDataArray[i] / 128.0; 
+                    const y = (v * height / 2); 
+
+                    if(i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                    x += sliceWidth;
+                }
+
+                ctx.lineTo(canvas.width, centerY); 
+                ctx.stroke();
+
+            } else {
+                // --- Simulated Waveform (Idle or Ghost Speaking) ---
+                const baseAmplitude = 8 * ghostScale; 
+                const frequency = 0.05; 
+
+                ctx.moveTo(0, centerY);
+                const segments = 120; 
+
+                for (let i = 0; i <= segments; i++) {
+                    const x = (i / segments) * width;
+                    const noise = Math.sin(x * frequency + time * 0.005) * baseAmplitude;
+                    const randomness = (Math.random() - 0.5) * 5 * ghostScale;
+                    const y = centerY + noise + randomness;
+                    ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            }
+        }
+        
+        /**
+         * Main animation loop driver.
+         */
+        function animateWaveLoop(useAnalyser = false, ghostScale = 1.0) {
+            if (waveAnimationId !== null) cancelAnimationFrame(waveAnimationId);
+            
+            const loop = (t) => {
+                drawWave(t, useAnalyser, ghostScale);
+                waveAnimationId = requestAnimationFrame(loop);
+            };
+            
+            waveAnimationId = requestAnimationFrame(loop);
+        }
+
+        /**
+         * Starts the quiet, ambient wave (idle state).
+         */
+        function idleWave() {
+            resizeCanvas();
+            animateWaveLoop(false, 0.8); // Low amplitude simulated wave
+        }
+
+        /**
+         * Starts a wave animation.
+         */
+        function startWave(useAnalyser = false) {
+            resizeCanvas();
+            if (useAnalyser) {
+                animateWaveLoop(true); // Use real-time audio data
+            } else {
+                animateWaveLoop(false, 1.5); // Use higher amplitude simulated wave for ghost
+            }
+        }
+
+
+        // --- UI & Location Logic ---
+
+        function updateStatus(text, className) {
+            statusEl.textContent = text;
+            statusEl.className = `text-center text-lg font-semibold ${className}`;
+        }
+
+        function toggleMicButton(listening) {
+            const isKeyMissing = API_KEY === "";
+            
+            isListening = listening;
+            // Only enable MIC button if location is locked, not communicating, and NO key error.
+            micButton.disabled = listening || !isLocationLocked || isCommunicating || isKeyMissing;
+            askButton.disabled = isCommunicating || !isLocationLocked || isKeyMissing; // Enable ASK button when ready
+            stopButton.disabled = !isCommunicating;
+            
+            if (isLocationLocked) {
+                tuningDial.classList.remove('dial-disabled');
+                // Simulate random tuning dial position
+                tuningDialMarker.style.transform = `rotate(${45 + Math.random() * 90}deg)`;
+            } else {
+                tuningDial.classList.add('dial-disabled');
+                tuningDialMarker.style.transform = 'rotate(45deg)';
+            }
+
+
+            if (listening || isCommunicating) {
+                micButton.classList.add('listening', 'bg-red-500');
+                micButton.classList.remove('bg-gray-600', 'hover:bg-red-600');
+            } else if (isLocationLocked && !isKeyMissing) {
+                micButton.classList.remove('listening', 'bg-red-500');
+                micButton.classList.add('bg-gray-600', 'hover:bg-red-600');
+            } else {
+                 micButton.classList.remove('listening', 'bg-red-500', 'bg-gray-600', 'hover:bg-red-600');
+            }
+        }
+        
+        function stopCommunication() {
+            isCommunicating = false;
+            
+            // 1. Stop Audio
+            stopStaticNoise();
+            if (mainGain) {
+                // Fade out sound quickly
+                mainGain.gain.setValueAtTime(mainGain.gain.value, audioContext.currentTime);
+                mainGain.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.1); 
+                // Restore volume for next time after a tiny delay
+                setTimeout(() => mainGain.gain.setValueAtTime(1, audioContext.currentTime + 0.2), 200); 
+            }
+            
+            // 2. Stop Recognition and Mic Stream
+            if (recognition) {
+                try {
+                    recognition.stop();
+                } catch (e) {
+                    // Ignore error if recognition is already stopped
+                    console.warn("Recognition already stopped:", e);
+                }
+            }
+            stopMicrophoneStream();
+
+            // 3. Update UI
+            if (API_KEY === "") {
+                updateStatus('API KEY MISSING', 'text-red-500');
+                responseTextEl.innerHTML = '<span class="text-sm italic text-red-400">Insert your Gemini API Key into the script.</span>';
+                textInputFallback.classList.add('hidden');
+            } else if (isLocationLocked) {
+                // Only change status if it wasn't a NO QUESTION DETECTED status, as onend will handle that.
+                if (statusEl.textContent !== 'NO QUESTION DETECTED.') {
+                    updateStatus('Communication Aborted. Ask another question.', 'text-yellow-500');
+                    responseTextEl.innerHTML = '<span class="text-sm italic text-gray-400">Connection interrupted. Tap the microphone or type below.</span>';
+                }
+                idleWave();
+            } else {
+                updateStatus('Ready to Investigate', 'text-green-500');
+                responseTextEl.innerHTML = '<span class="text-sm italic text-gray-400">Please lock the investigation location.</span>';
+                textInputFallback.classList.add('hidden');
+                idleWave();
+            }
+            
+            citationArea.classList.add('hidden');
+            toggleMicButton(false);
+        }
+
+        function resetLocation() {
+            if (!isLocationLocked) return;
+
+            if (isCommunicating) {
+                stopCommunication();
+            }
+
+            isLocationLocked = false;
+            locationWrapper.classList.remove('hidden'); 
+            
+            if (API_KEY === "") {
+                stopCommunication(); // This will display the key error
+            } else {
+                updateStatus('Location Unlocked. Please set a new location.', 'text-yellow-500');
+                responseTextEl.innerHTML = '<span class="text-sm italic text-gray-400">Please lock the investigation location.</span>';
+                citationArea.classList.add('hidden');
+                textInputFallback.classList.add('hidden');
+                idleWave();
+            }
+            toggleMicButton(false);
+        }
+
+
+        function lockLocation() {
+            const location = locationInput.value.trim();
+            if (location) {
+                isLocationLocked = true;
+                locationWrapper.classList.add('hidden'); 
+                
+                if (API_KEY === "") {
+                    stopCommunication(); // This will display the key error
+                } else {
+                    updateStatus('Location Locked. Tap MIC to begin.', 'text-green-500');
+                    responseTextEl.innerHTML = '<span class="text-sm italic text-gray-400">Awaiting contact... Tap the microphone or type below.</span>';
+                    // Always show the text input now that we know speech recognition is unreliable.
+                    textInputFallback.classList.remove('hidden');
+                }
+                
+                toggleMicButton(false);
+
+            } else {
+                showModal('Location cannot be empty. Please enter a location.');
+                updateStatus('Error', 'text-yellow-500');
+            }
+        }
+
+        locationInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                lockLocation();
+            }
+        });
+        
+        textQuestionInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !askButton.disabled) {
+                askTextQuestion();
+            }
+        });
+
+        // --- Text Input Fallback Logic ---
+        function askTextQuestion() {
+            const question = textQuestionInput.value.trim();
+            if (isCommunicating || !isLocationLocked || question === '') return;
+            
+            if (API_KEY === "") {
+                stopCommunication();
+                return;
+            }
+
+            // Clear the input after grabbing the value
+            textQuestionInput.value = ''; 
+            
+            // Proceed to generate the ghost response with the typed question
+            generateGhostResponse(question, locationInput.value);
+        }
+
+
+        // --- Speech Recognition Logic ---
+
+        async function startListening() {
+            const isKeyMissing = API_KEY === "";
+            
+            // Resume Audio Context at the earliest possible moment for mobile compatibility
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume().catch(e => console.error("Could not resume AudioContext:", e));
+            }
+
+            if (isListening || !isLocationLocked || isCommunicating) return;
+            
+            // Check for key error first
+            if (isKeyMissing) {
+                stopCommunication(); // This will show the appropriate error message
+                return;
+            }
+
+            if (!('webkitSpeechRecognition' in window)) {
+                updateStatus('Speech Recognition not supported in this browser.', 'text-red-500');
+                // Force text input if speech is unsupported
+                textInputFallback.classList.remove('hidden');
+                return;
+            }
+            
+            updateStatus('REQUESTING MIC ACCESS...', 'text-yellow-500');
+            micButton.disabled = true; // Disable button while asking for permission
+            askButton.disabled = true; // Disable text button too
+
+            // --- Step 1: Get Microphone Stream (Permission Request) ---
+            try {
+                // *** MICROPHONE PERMISSION REQUEST (getUserMedia) ***
+                const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream = micStream; 
+                streamSource = audioContext.createMediaStreamSource(micStream);
+                streamSource.connect(analyser); // Connect mic input to the analyser
+            } catch (err) {
+                console.error('Microphone access denied:', err);
+                updateStatus('MIC ACCESS DENIED. Enable in settings.', 'text-red-500');
+                micButton.disabled = false;
+                askButton.disabled = false;
+                idleWave();
+                return;
+            }
+            
+            // --- Step 2: Start Speech Recognition ---
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                toggleMicButton(true);
+                updateStatus('LISTENING... Speak Now.', 'text-red-500');
+                responseTextEl.innerHTML = '';
+                citationArea.classList.add('hidden');
+                startWave(true); // Start Real-Time Waveform
+                speechResultFound = false; // <-- RESET FLAG
+                console.log("[Recognition Start] Listening started.");
+            };
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                console.log(`[Recognition Result] Transcript: "${transcript}"`);
+                updateStatus(`QUESTION: "${transcript}"`, 'text-yellow-500');
+                speechResultFound = true; // <-- SET FLAG
+                // We use the same function for both text and voice input
+                generateGhostResponse(transcript, locationInput.value);
+            };
+
+            recognition.onerror = (event) => {
+                const errorType = event.error;
+                console.error('Speech recognition error event:', errorType); 
+                
+                // Only stop the stream if it hasn't been stopped by onend or another function
+                if (stream) { 
+                    stopMicrophoneStream();
+                }
+                
+                if (errorType === 'not-allowed') {
+                    updateStatus('MIC ACCESS DENIED.', 'text-red-500');
+                    responseTextEl.innerHTML = '<span class="text-sm italic text-red-400">Permission was blocked by the browser or OS.</span>';
+                } else if (errorType === 'no-speech') {
+                    // This error is fired by the browser when it detects audio but not meaningful speech
+                    updateStatus('NO QUESTION DETECTED.', 'text-yellow-500');
+                    responseTextEl.innerHTML = '<span class="text-sm italic text-gray-400">Browser detected audio but could not transcribe it. Try speaking clearer or use text input below.</span>';
+                } 
+                else {
+                    // *** CRITICAL CHANGE: Display the raw error code on screen ***
+                    updateStatus('SPEECH ERROR CODE:', 'text-red-500');
+                    responseTextEl.innerHTML = `<span class="text-sm italic text-red-400">CODE: ${errorType}. This suggests an issue with the mic input or browser setup. Use text input.</span>`;
+                }
+                
+                toggleMicButton(false);
+                idleWave();
+            };
+
+            recognition.onend = () => {
+                // Clean up mic stream when recognition session ends
+                if (!isCommunicating) {
+                    stopMicrophoneStream(); 
+                    toggleMicButton(false);
+                    idleWave(); 
+                    
+                    // --- DIAGNOSTIC LOGGING ---
+                    console.log(`[Recognition End] Speech result found: ${speechResultFound}.`);
+                    
+                    // Display the "NO QUESTION DETECTED" message if no successful result was found
+                    if (!speechResultFound) {
+                        updateStatus('NO QUESTION DETECTED.', 'text-yellow-500');
+                        responseTextEl.innerHTML = '<span class="text-sm italic text-gray-400">Please speak clearly or use text input below.</span>';
+                    }
+                }
+            };
+            
+            // Start the recognition
+            recognition.start();
+        }
+
+        
+        /**
+         * Generates TTS audio for a single text fragment and plays it fragmented.
+         */
+        async function ttsAndPlay(fragmentText) {
+            
+            // Resume Audio Context right before attempting to play sound (Critical for mobile)
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume().catch(e => console.error("Could not resume AudioContext before TTS:", e));
+            }
+
+            const ttsPrompt = `Speak this fragment with a cold, spectral tone, as if the audio is struggling through heavy static and the speaker is speaking from another dimension: "${fragmentText}"`;
+            
+            const payload = {
+                contents: [{ parts: [{ text: ttsPrompt }] }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: "Kore" }
+                        }
+                    }
+                },
+                model: "gemini-2.5-flash-preview-tts"
+            };
+
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                if (!isCommunicating) return 0.0; // Immediate exit if STOP is pressed
+                
+                try {
+                    // *** USE fetchWithTimeout (15 seconds) FOR NETWORK RESILIENCE ***
+                    const response = await fetchWithTimeout(`${TTS_API_URL}?key=${API_KEY}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }, 15000); 
+                    
+                    if (!response.ok) {
+                         // Check for rate limit and retry
+                         if (response.status === 429 && attempt < maxRetries - 1) {
+                            const delay = getBackoffDelay(attempt);
+                            console.warn(`Attempt ${attempt + 1}: TTS Rate limit exceeded. Retrying in ${delay / 1000}s...`);
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            continue;
+                        }
+                        // Check for key failure (400 or 403)
+                        if (response.status === 400 || response.status === 403) {
+                             throw new Error("API_KEY_INVALID");
+                        }
+
+                        throw new Error(`TTS HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    const part = result?.candidates?.[0]?.content?.parts?.[0];
+                    const audioData = part?.inlineData?.data;
+                    const mimeType = part?.inlineData?.mimeType;
+
+                    if (!isCommunicating) return 0.0; // Immediate exit after successful fetch if STOP is pressed
+
+                    if (audioData && mimeType && mimeType.startsWith("audio/L16")) {
+                        const sampleRateMatch = mimeType.match(/rate=(\d+)/);
+                        const sampleRate = sampleRateMatch ? parseInt(sampleRateMatch[1], 10) : 24000;
+                        
+                        const pcmData = base64ToArrayBuffer(audioData);
+                        const pcm16 = new Int16Array(pcmData);
+                        const wavBlob = pcmToWav(pcm16, sampleRate);
+
+                        const arrayBuffer = await wavBlob.arrayBuffer();
+                        // This step is often the mobile failure point (CPU intensive)
+                        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                        
+                        return playFragmentedAudio(audioBuffer);
+
+                    } else {
+                        console.warn("TTS response was empty or not PCM audio. Using default silent delay. API response:", result);
+                        return 0.5; 
+                    }
+
+                } catch (error) {
+                    if (error.message === "ConnectionTimeout") {
+                        console.error(`TTS API: Attempt ${attempt + 1} timed out.`);
+                         if (attempt === maxRetries - 1) {
+                             throw new Error("TTS_TIMEOUT_FINAL");
+                         }
+                    } else if (error.message === "API_KEY_INVALID") {
+                         throw error; // Propagate up to generateGhostResponse for unified handling
+                    } else if (error.name === 'EncodingError') {
+                         console.error("Audio Decoding failed on mobile:", error);
+                         throw new Error("TTS_DECODE_FAILED"); // New, specific error for decoding failure
+                    } else {
+                        console.error("TTS API Failure:", error);
+                    }
+                    
+                     if (attempt === maxRetries - 1) {
+                        return 0.5; // Final fallback delay
+                    } else {
+                        const delay = getBackoffDelay(attempt);
+                        console.warn(`Attempt ${attempt + 1}: TTS Failed. Retrying in ${delay / 1000}s...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                }
+            }
+            return 0.5;
+        }
+
+        /**
+         * Animates a single fragment span: fade in, hold, then fade out quickly.
+         */
+        function animateFragment(spanElement, holdDurationMs) {
+            const FADE_OUT_DURATION_MS = 100;
+
+            return new Promise(resolve => {
+                // 1. Fade In
+                setTimeout(() => {
+                    spanElement.classList.add('active');
+                }, 10);
+
+                // 2. Hold, then Fade Out
+                setTimeout(() => {
+                    spanElement.classList.add('fading-out');
+                    spanElement.classList.remove('active');
+
+                    setTimeout(() => {
+                        spanElement.remove();
+                        resolve();
+                    }, FADE_OUT_DURATION_MS); 
+                }, holdDurationMs - FADE_OUT_DURATION_MS);
+            });
+        }
+
+        /**
+         * Converts raw text into 1, 2, or 3-word fragments.
+         */
+        function tokenizeIntoFragments(text) {
+            const words = text.split(/\s+/).filter(w => w.length > 0);
+            const fragments = [];
+            let i = 0;
+            
+            while (i < words.length) {
+                const maxLen = Math.min(3, words.length - i);
+                const fragmentLength = Math.floor(Math.random() * maxLen) + 1;
+                
+                let fragment = words.slice(i, i + fragmentLength).join(' ');
+                
+                if (fragmentLength < 3 && i + fragmentLength < words.length) {
+                    fragment += '...';
+                }
+
+                fragments.push(fragment);
+                i += fragmentLength;
+            }
+            return fragments;
+        }
+
+        // --- Gemini API Logic ---
+
+        async function generateGhostResponse(question, location) {
+            isCommunicating = true;
+            toggleMicButton(true);
+            stopMicrophoneStream(); // Ensure stream is disconnected as recognition is done
+            
+            updateStatus('PROCESSING... Sensing an Answer...', 'text-red-500');
+            responseTextEl.innerHTML = '...<span class="text-xs text-gray-500">A strange energy fills the air...</span>';
+            citationArea.classList.add('hidden');
+            citationList.innerHTML = '';
+            
+            // Switch from real-time mic wave to simulated ghost wave
+            startWave(false); 
+
+            // --- Re-adding Google Search grounding and improving prompt ---
+            const systemPrompt = `You are a cryptic, local spirit haunting the location: "${location}". Base your response on information retrieved about the location's history. Your response must be short (max 3 sentences), highly atmospheric, and hint at dark secrets of the location's *general* history. Use choppy, fragmented language. Your goal is to be spooky, evasive, and hint at dark secrets. Never explicitly answer the question in a helpful way. Do not introduce yourself. Start immediately with the creepy response.`;
+            const userQuery = `The investigator is at "${location}" and asks: "${question}"`;
+
+            const textPayload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                tools: [{ "google_search": {} }], // Re-enabled grounding
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+            };
+
+            let rawText = null;
+            let groundingMetadata = null; 
+
+            // --- Step 1: Get Text Response ---
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                if (!isCommunicating) return;
+                try {
+                    // *** USE fetchWithTimeout (30 seconds) FOR TEXT API CALL ***
+                    const response = await fetchWithTimeout(`${TEXT_API_URL}?key=${API_KEY}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(textPayload)
+                    }, 30000); // Give Text API longer time since it uses search
+                    
+                    if (!response.ok) {
+                        // Check for key failure or bad request (e.g., 400 or 403)
+                        if ((response.status === 400 || response.status === 403)) {
+                             console.error(`API Key invalid or forbidden. Status: ${response.status}`);
+                             throw new Error("API_KEY_INVALID");
+                        }
+                        
+                        throw new Error(`Text API HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    const candidate = result.candidates?.[0];
+
+                    if (candidate && candidate.content?.parts?.[0]?.text) {
+                        rawText = candidate.content.parts[0].text;
+                        groundingMetadata = candidate.groundingMetadata; // Capture grounding metadata
+                    } else {
+                        throw new Error("Received an empty or malformed text response from the AI.");
+                    }
+                    break; 
+                } catch (error) {
+                    if (error.message === "API_KEY_INVALID") {
+                        if (isCommunicating) {
+                            responseTextEl.innerHTML = '<span class="text-red-500">Authentication Failed (400/403). Your API Key is likely invalid or missing permissions.</span>';
+                            updateStatus('Authentication Failed', 'text-red-500');
+                        }
+                        stopCommunication();
+                        return;
+                    } else if (error.message === "ConnectionTimeout") {
+                        console.error(`Text API: Attempt ${attempt + 1} timed out.`);
+                         if (attempt === maxRetries - 1) {
+                            if (isCommunicating) {
+                                responseTextEl.innerHTML = '...<span class="text-red-500">Connection Timeout. Signal is too weak. Try moving to a better location.</span>';
+                                updateStatus('Connection Timeout', 'text-red-500');
+                            }
+                            stopCommunication();
+                            return;
+                         }
+                    } else {
+                        console.error("Text API Failure:", error);
+                    }
+                    
+                    if (attempt === maxRetries - 1) {
+                         if (isCommunicating) {
+                            responseTextEl.innerHTML = '...<span class="text-red-500">The connection has been lost. Something blocked the signal. Try again.</span>';
+                            updateStatus('Connection Lost', 'text-red-500');
+                         }
+                         stopCommunication();
+                         return;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, getBackoffDelay(attempt)));
+                }
+            }
+
+            // --- Step 2: Stream Audio and Animation (Fragmented) ---
+            if (rawText && isCommunicating) {
+                updateStatus('TEXT RECEIVED. Preparing spectral voice...', 'text-yellow-500'); 
+                const fragments = tokenizeIntoFragments(rawText);
+                responseTextEl.innerHTML = ''; 
+
+                startStaticNoise(); 
+
+                try {
+                    for (let i = 0; i < fragments.length; i++) {
+                        if (!isCommunicating) break;
+                        const fragmentText = fragments[i].trim();
+                        if (fragmentText) {
+                            const span = document.createElement('span');
+                            span.textContent = fragmentText + ' '; 
+                            span.classList.add('animated-sentence');
+                            responseTextEl.appendChild(span);
+
+                            // Call the audio function which now has its own timeout and mobile checks
+                            const totalDurationSeconds = await ttsAndPlay(fragmentText);
+                            
+                            if (!isCommunicating) break; 
+                            
+                            const holdDurationMs = totalDurationSeconds * 1000;
+                            
+                            await animateFragment(span, holdDurationMs);
+                        }
+                    }
+                } catch (error) {
+                    if (error.message === "TTS_TIMEOUT_FINAL") {
+                        responseTextEl.innerHTML = '<span class="text-red-500">TTS Timeout. Failed to download spectral voice data. Try again.</span>';
+                        updateStatus('Voice Failed (Timeout)', 'text-red-500');
+                    } else if (error.message === "TTS_DECODE_FAILED") { // Handle the new specific decode failure
+                        responseTextEl.innerHTML = '<span class="text-red-500">Critical Audio Error. Mobile CPU failed to process spectral audio. Try on a desktop.</span>';
+                        updateStatus('Audio Decode Failed', 'text-red-500');
+                    } else {
+                        console.error("Critical error during audio streaming:", error);
+                        if (isCommunicating) {
+                             responseTextEl.innerHTML = '<span class="text-red-500">Critical Error: Voice channel suddenly dropped. Try again.</span>';
+                             updateStatus('Channel Dropped', 'text-red-500');
+                        }
+                    }
+                    stopCommunication();
+                    return;
+                }
+
+                if (isCommunicating) {
+                    stopStaticNoise();
+                    
+                    updateStatus('Contact Established. Ask another question.', 'text-red-500'); 
+                    idleWave(); 
+                    
+                    // --- Citation Logic (after all fragments are played) ---
+                    if (groundingMetadata && groundingMetadata.groundingAttributions) {
+                        const sources = groundingMetadata.groundingAttributions
+                            .map(attribution => ({
+                                uri: attribution.web?.uri,
+                                title: attribution.web?.title,
+                            }))
+                            .filter(source => source.uri && source.title)
+                            .slice(0, 2); // Limit to 2 sources
+
+                        if (sources.length > 0) {
+                            citationList.innerHTML = sources.map((s, i) =>
+                                `<a href="${s.uri}" target="_blank" class="underline text-gray-500 hover:text-red-400">${s.title}</a>${i < sources.length - 1 ? ', ' : ''}`
+                            ).join('');
+                            citationArea.classList.remove('hidden');
+                        }
+                    } else {
+                        citationArea.classList.add('hidden');
+                    }
+                    
+                    isCommunicating = false;
+                }
+            }
+            
+            toggleMicButton(false);
+        }
+
+        // Initial setup on load
+        window.onload = () => {
+            setupAudioNodes(); // Now sets up Analyser
+            resizeCanvas(); 
+            
+            if (API_KEY === "") {
+                updateStatus('API KEY MISSING', 'text-red-500');
+                responseTextEl.innerHTML = '<span class="text-sm italic text-red-400">Insert your Gemini API Key into the script.</span>';
+                micButton.disabled = true;
+                askButton.disabled = true;
+                textInputFallback.classList.remove('hidden'); // Show text input to alert about key
+            } else if (!('webkitSpeechRecognition' in window)) {
+                updateStatus('Speech API not supported.', 'text-red-500');
+                micButton.disabled = true;
+                textInputFallback.classList.remove('hidden'); // Force text input
+            } else {
+                updateStatus('Please Lock Location', 'text-yellow-500');
+                idleWave(); 
+            }
+            toggleMicButton(false); 
+        };
+
+        window.addEventListener('resize', resizeCanvas);
+        window.addEventListener('beforeunload', stopCommunication); // Ensure resources are cleaned up
+    </script>
+</body>
+</html>
